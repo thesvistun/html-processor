@@ -33,9 +33,7 @@ import javax.script.ScriptEngine;
 import javax.script.ScriptEngineManager;
 import javax.script.ScriptException;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -43,109 +41,127 @@ import java.util.regex.Pattern;
 public class Processor {
     private static final Logger log = Logger.getLogger(Processor.class.getSimpleName());
 
-    public Object process(List<Step> steps, Object src) throws ScriptException {
+    public List<String> process(List<Step> steps, Object src) throws ProcessorException {
         Object result = src;
         for (Step step : steps) {
-            switch (step.getType()) {
-                case "jsoup_element_list_get_data":
-                    result = getData(((List<Element>) result));
-                    break;
-                case "get_data_str_list":
-                    result = getDataStrList((List<String>) result, step);
-                    break;
-                case "js":
-                        result = js((List<String>) result);
-                    break;
-                case "remove_line":
-                    result = removeLine((List<String>) result, step);
-                    break;
-                case "replace_line":
-                    result = replaceLine((List<String>) result, step);
-                    break;
-                case "json_doc_select":
-                    if (step.getArg(2).equals("doc")) {
-                        result = select(step.getArg(1), (Document) result);
+            if (result instanceof List) {
+                List<Object> _result = new ArrayList<>();
+                for (Object obj : (List) result ) {
+                    if (obj instanceof Element) {
+                        switch (step.getType()) {
+                            case "jsoup_elements-get_data-strings":
+                                _result.add(getData((Element) obj));
+                                break;
+                            default:
+                                throw new ProcessorException(String.format("Step %s does not exist for %s input as input",
+                                        step.getType(),
+                                        obj.getClass()));
+                        }
+                    } else if (obj instanceof String) {
+                        switch (step.getType()) {
+                            case "strings-get_data-strings":
+                                String str = getDataStrList((String) obj, step);
+                                if (null == str) continue;
+                                _result.add(str);
+                                break;
+                            case "strings-js-strings":
+                                try {
+                                    _result.add(js((String) obj));
+                                } catch (ScriptException e) {
+                                    throw new ProcessorException(String.format("%s: %s",
+                                            e.getClass().getSimpleName(),
+                                            e.getMessage()));
+                                }
+                                break;
+                            case "strings-remove_line-strings":
+                                _result.add(removeLine((String) obj, step));
+                                break;
+                            case "strings-replace_line-strings":
+                                _result.add(replaceLine((String) obj, step));
+                                break;
+                            case "strings-trim_lines-strings":
+                                _result.add(trimLines((String) obj));
+                                break;
+                            default:
+                                throw new ProcessorException(String.format("Step %s does not exist for %s input as input",
+                                        step.getType(),
+                                        obj.getClass()));
+                        }
                     }
-                    break;
-                case "trim_lines":
-                    result = trimLines((List<String>) result);
-                    break;
-            }
-        }
-        return result;
-    }
-
-    private List<String> getData(List<Element> elements) {
-        List<String> result = new ArrayList<>();
-        for (Element element : elements) {
-            StringBuilder sb = new StringBuilder();
-            for (String line : element.data().split("\\r?\\n")) {
-                if (sb.length() > 0) {
-                    sb.append(System.lineSeparator());
                 }
-                sb.append(line);
-            }
-            log.debug("Data: " + System.lineSeparator() + sb.toString());
-            result.add(sb.toString());
-        }
-        return result;
-    }
-
-    private Set<String> getDataStrList(List<String> strList, Step step) {
-        Set<String> result = new HashSet<>();
-        for (String str : strList) {
-            Pattern pattern = Pattern.compile(step.getArg(1));
-            for (String line : str.split(System.lineSeparator())) {
-                Matcher matcher = pattern.matcher(line);
-                if (matcher.matches()) {
-                    //todo number of groups take from a config.
-                    String ip = matcher.group(1);
-                    int port = Integer.parseInt(matcher.group(2));
-                    result.add(String.format("%s:%s", ip, port));
-                    break;
+                result = _result;
+            } else {
+                if (result instanceof Document) {
+                    switch (step.getType()) {
+                        case "doc-select-elements":
+                            if (step.getArg(2).equals("doc")) {
+                                result = select(step.getArg(1), (Document) result);
+                            }
+                            break;
+                        default:
+                            throw new ProcessorException(String.format("Step %s does not exist for %s input as input",
+                                    step.getType(),
+                                    result.getClass()));
+                    }
                 }
             }
         }
-        return result;
+        return (result instanceof List && ((List) result).get(0) instanceof String) ? (List) result : null;
     }
 
-    private List<String> js(List<String> strList) throws ScriptException {
-        List<String> result = new ArrayList<>();
+    private String getData(Element element) {
+        StringBuilder sb = new StringBuilder();
+        for (String line : element.data().split("\\r?\\n")) {
+            if (sb.length() > 0) {
+                sb.append(System.lineSeparator());
+            }
+            sb.append(line);
+        }
+        log.debug("Data: " + System.lineSeparator() + sb.toString());
+        return sb.toString();
+    }
+
+    private String getDataStrList(String str, Step step) {
+        Pattern pattern = Pattern.compile(step.getArg(1));
+        for (String line : str.split(System.lineSeparator())) {
+            Matcher matcher = pattern.matcher(line);
+            if (matcher.matches()) {
+                //todo number of groups take from a config.
+                String ip = matcher.group(1);
+                int port = Integer.parseInt(matcher.group(2));
+                return String.format("%s:%s", ip, port);
+            }
+        }
+        return null;
+    }
+
+    private String js(String str) throws ScriptException {
         ScriptEngineManager factory = new ScriptEngineManager();
         ScriptEngine engine = factory.getEngineByName("nashorn");
-        for (String str : strList) {
-            String exec = (String) engine.eval(str);
-            log.debug(exec);
-            result.add(exec);
-        }
-        return result;
+        String exec = (String) engine.eval(str);
+        log.debug(exec);
+        return exec;
     }
 
 
-    private List<String> removeLine(List<String> strList, Step step) {
-        List<String> result = new ArrayList<>();
-        for (String str : strList) {
-            StringBuilder sb = new StringBuilder();
-            for (String line : str.split(System.lineSeparator())) {
-                line = line.trim();
-                if (line.matches(step.getArg(1))) {
-                    log.debug("Removing: " + line);
-                    continue;
-                }
-                if (sb.length() > 0) {
-                    sb.append(System.lineSeparator());
-                }
-                sb.append(line);
+    private String removeLine(String str, Step step) {
+        StringBuilder sb = new StringBuilder();
+        for (String line : str.split(System.lineSeparator())) {
+            line = line.trim();
+            if (line.matches(step.getArg(1))) {
+                log.debug("Removing: " + line);
+                continue;
             }
-            result.add(sb.toString());
+            if (sb.length() > 0) {
+                sb.append(System.lineSeparator());
+            }
+            sb.append(line);
         }
-        return result;
+        return sb.toString();
     }
 
-    private List<String> replaceLine(List<String> strList, Step step) {
-        List<String> result = new ArrayList<>();
+    private String replaceLine(String str, Step step) {
         Pattern pattern = Pattern.compile(step.getArg(1));
-        for (String str : strList) {
             StringBuilder sb = new StringBuilder();
             for (String line : str.split(System.lineSeparator())) {
                 line = line.trim();
@@ -172,18 +188,14 @@ public class Processor {
                 }
             }
             log.debug(sb.toString());
-            result.add(sb.toString());
-        }
-        return result;
+        return sb.toString();
     }
 
     private Elements select(String request, Document doc) {
         return doc.select(request);
     }
 
-    private List<String> trimLines(List<String> strList) {
-        List<String> result = new ArrayList<>();
-        for (String str : strList) {
+    private String trimLines(String str) {
             StringBuilder sb = new StringBuilder();
             for (String line : str.split(System.lineSeparator())) {
                 line = line.trim();
@@ -194,8 +206,6 @@ public class Processor {
                 sb.append(line);
             }
             log.debug("Result: " + System.lineSeparator() + sb.toString());
-            result.add(sb.toString());
-        }
-        return result;
+        return sb.toString();
     }
 }
