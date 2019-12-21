@@ -27,6 +27,7 @@ package name.svistun.http;
 import org.apache.log4j.Logger;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
+import org.jsoup.nodes.Node;
 import org.jsoup.select.Elements;
 
 import javax.script.ScriptEngine;
@@ -103,10 +104,34 @@ public class Processor {
                                     step.getType(),
                                     result.getClass()));
                     }
+                } else if (result instanceof Element) {
+                    switch (step.getType()) {
+                        case "element-child-element":
+                            result = getChild(Integer.parseInt(step.getArg(1)), (Element) result);
+                            break;
+                        default:
+                            throw new ProcessorException(String.format("Step %s does not exist for %s input as input",
+                                    step.getType(),
+                                    result.getClass()));
+                    }
+                } else if (result instanceof Node) {
+                    switch (step.getType()) {
+                        case "node-attr-string":
+                            result = getAttribute(step.getArg(1), (Node) result);
+                            break;
+                        default:
+                            throw new ProcessorException(String.format("Step %s does not exist for %s input as input",
+                                    step.getType(),
+                                    result.getClass()));
+                    }
                 }
             }
         }
         return (result instanceof List && ((List) result).get(0) instanceof String) ? (List) result : null;
+    }
+
+    private String getAttribute(String name, Node node) {
+        return node.attr(name);
     }
 
     private String getData(Element element) {
@@ -133,6 +158,10 @@ public class Processor {
             }
         }
         return null;
+    }
+
+    private Element getChild(int index, Element element) {
+        return element.child(index);
     }
 
     private String js(String str) throws ScriptException {
